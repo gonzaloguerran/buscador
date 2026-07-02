@@ -40,9 +40,8 @@
 </div>
 
 <script>
-    const dataset = [
-
-        { Categoria ;Apellidos, Nombres;Rut;F. Nacimiento;Prevision salud;Valores;Base
+    // Base de datos envuelta correctamente como String y separada por punto y coma (;)
+    var csvData = `Categoria;Apellidos, Nombres;Rut;F. Nacimiento;Prevision salud;Valores;Base
 SUB-08;Agustin Alonso Vargas Chavez ;26128899-0 ;14/02/2018;FONASA B; $90.900 ;Primer Envio
 SUB-08;Facundo Tomás Aguayo Rojas;26056974-0;01/01/2018;FONASA B; $90.900 ;Primer Envio
 SUB-08;Renato Vicente Contreras Vargas ;26602494-0;03/12/2018;FONASA B; $90.900 ;Primer Envio
@@ -335,44 +334,88 @@ SUB-14;Maximiliano Carvajal Pulgar ;23942714-6;30/04/2012;FONASA D; 90.900 ; Sep
 SUB-14;Nicolas Monkeberg Cruz;23.803.645-3;17/11/2011;COLMENA; 71.900 ; Septimo Envio
 SUB-16;Alan Miguel Altamirano Calistro ;23335159-8;25/05/2010;FONASA B; 90.900 ; Septimo Envio
 SUB-16;Eder Zenon Altamirano Calistro;23335180-6;25/05/2010;FONASA B; 90.900 ; Septimo Envio
-;Stefania Maturana;24110611-k;;FONASA B; 90.900 ; Octavo Envio}
-  
-    ];
+;Stefania Maturana;24110611-k;;FONASA B; 90.900 ; Octavo Envio`;
 
-    const searchInput = document.getElementById('searchInput');
-    const tableBody = document.getElementById('tableBody');
-
-    const normalize = (str) => str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-
-    searchInput.addEventListener('input', () => {
-        const val = normalize(searchInput.value);
-        const terms = val.split(' ').filter(t => t.length > 0);
+    // Procesador adaptado para separar por punto y coma (;)
+    function parseCSV(text) {
+        var lines = text.split('\n');
+        var result = [];
         
-        let filtered = dataset.filter(item => {
-            const rowStr = normalize(`${item.nombre} ${item.rut}`);
-            return terms.every(term => rowStr.includes(term));
-        });
+        for (var i = 1; i < lines.length; i++) {
+            var line = lines[i].trim();
+            if (!line) continue;
+            
+            var cols = line.split(';'); // <--- Cambiado de ',' a ';'
+            if (cols.length >= 5) {
+                // Si la fecha viene vacía, mostrar "Sin registro"
+                var fechaOriginal = cols[3] ? cols[3].trim() : "Sin registro";
+                
+                result.push({
+                    nombre: (cols[1] || "").trim(),
+                    rut: (cols[2] || "").trim(),
+                    fecha: fechaOriginal,
+                    prevision: (cols[4] || "").trim()
+                });
+            }
+        }
+        return result;
+    }
 
+    var dataset = parseCSV(csvData);
+    var searchInput = document.getElementById('searchInput');
+    var tableBody = document.getElementById('tableBody');
+
+    // Limpieza de acentos 100% compatible
+    function normalizeText(str) {
+        if (!str) return "";
+        var map = {
+            'á': 'a', 'é': 'e', 'í': 'i', 'ó': 'o', 'ú': 'u',
+            'Á': 'a', 'É': 'e', 'Í': 'i', 'Ó': 'o', 'Ú': 'u',
+            'ü': 'u', 'Ü': 'u', 'ñ': 'n', 'Ñ': 'n'
+        };
+        var res = str.toLowerCase();
+        var salida = "";
+        for (var i = 0; i < res.length; i++) {
+            salida += map[res.charAt(i)] || res.charAt(i);
+        }
+        return salida;
+    }
+
+    searchInput.addEventListener('input', function() {
+        var val = normalizeText(searchInput.value);
+        var terms = val.split(' ').filter(function(t) { return t.length > 0; });
+        
         if (val === "") {
             document.body.style.backgroundColor = 'var(--ios-bg)';
             tableBody.innerHTML = '';
             return;
         }
 
+        var filtered = dataset.filter(function(item) {
+            var rowStr = normalizeText(item.nombre + " " + item.rut);
+            return terms.every(function(term) {
+                return rowStr.indexOf(term) !== -1;
+            });
+        });
+
         if (filtered.length === 0) {
             document.body.style.backgroundColor = 'var(--error-red)';
             tableBody.innerHTML = '';
         } else {
             document.body.style.backgroundColor = 'var(--ios-bg)';
-            const displayData = filtered.slice(0, 5);
-            tableBody.innerHTML = displayData.map(item => `
-                <tr class="match-row">
-                    <td>${item.nombre}</td>
-                    <td>${item.rut}</td>
-                    <td>${item.fecha}</td>
-                    <td>${item.prevision}</td>
-                </tr>
-            `).join('');
+            var displayData = filtered.slice(0, 5);
+            var html = "";
+            
+            for (var j = 0; j < displayData.length; j++) {
+                var item = displayData[j];
+                html += '<tr class="match-row">' +
+                        '<td>' + item.nombre + '</td>' +
+                        '<td>' + item.rut + '</td>' +
+                        '<td>' + item.fecha + '</td>' +
+                        '<td>' + item.prevision + '</td>' +
+                    '</tr>';
+            }
+            tableBody.innerHTML = html;
         }
     });
 </script>
