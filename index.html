@@ -7,12 +7,23 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>Consulta Deportistas</title>
     <style>
-        :root { --ios-bg: #f2f2f7; --header-bg: #ffffff; --accent-green: #34c759; --error-red: #ff3b30; }
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: var(--ios-bg); margin: 0; padding-top: 70px; transition: background 0.3s ease; }
+        :root { --ios-bg: #f2f2f7; --header-bg: #ffffff; --accent-green: #34c759; --accent-blue: #007aff; --error-red: #ff3b30; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: var(--ios-bg); margin: 0; transition: background 0.3s ease; }
+        
+        /* PANTALLA DE LOGIN */
+        #loginScreen { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: var(--ios-bg); display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 999; padding: 20px; box-sizing: border-box; }
+        .login-card { background: white; padding: 30px 20px; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); width: 100%; max-width: 320px; text-align: center; }
+        .login-card h2 { margin-top: 0; font-size: 22px; font-weight: 600; margin-bottom: 20px; }
+        .login-input { width: 100%; padding: 15px; border-radius: 10px; border: 1px solid #c6c6c8; font-size: 18px; text-align: center; margin-bottom: 15px; box-sizing: border-box; letter-spacing: 2px; }
+        .login-btn { background: var(--accent-blue); color: white; border: none; padding: 15px; width: 100%; border-radius: 10px; font-size: 16px; font-weight: 600; cursor: pointer; }
+        .error-msg { color: var(--error-red); font-size: 14px; margin-top: 10px; display: none; }
+
+        /* CONTENIDO DE LA APP (Oculto por defecto) */
+        #appContent { display: none; padding-top: 70px; }
         
         /* Barra de búsqueda */
         .sticky-header { position: fixed; top: 0; left: 0; right: 0; padding: 15px; background: var(--header-bg); border-bottom: 0.5px solid #c6c6c8; z-index: 100; }
-        input { width: 100%; padding: 12px; border-radius: 10px; border: none; background: #e5e5ea; font-size: 16px; box-sizing: border-box; }
+        .search-input { width: 100%; padding: 12px; border-radius: 10px; border: none; background: #e5e5ea; font-size: 16px; box-sizing: border-box; }
         
         /* Tabla */
         .table-container { overflow-x: auto; padding: 10px; }
@@ -21,26 +32,72 @@
         th { background: #f9f9f9; font-weight: 600; color: #8e8e93; }
         
         .match-row { background-color: rgba(52, 199, 89, 0.2); }
-        .no-match { background-color: var(--error-red) !important; }
     </style>
 </head>
 <body>
 
-<div class="sticky-header">
-    <input type="text" id="searchInput" placeholder="Buscar por nombre o RUT...">
+<!-- Pantalla de Barrera / Login -->
+<div id="loginScreen">
+    <div class="login-card">
+        <h2>Acceso Restringido</h2>
+        <input type="password" id="pinInput" class="login-input" placeholder="Ingresa el PIN" inputmode="numeric">
+        <button id="loginBtn" class="login-btn">Entrar</button>
+        <div id="errorMsg" class="error-msg">PIN incorrecto, intenta nuevamente.</div>
+    </div>
 </div>
 
-<div class="table-container">
-    <table id="resultsTable">
-        <thead>
-            <tr><th>Nombre</th><th>RUT</th><th>Fecha Nac.</th><th>Previsión</th></tr>
-        </thead>
-        <tbody id="tableBody"></tbody>
-    </table>
+<!-- Contenido real de la App -->
+<div id="appContent">
+    <div class="sticky-header">
+        <input type="text" id="searchInput" class="search-input" placeholder="Buscar por nombre o RUT...">
+    </div>
+
+    <div class="table-container">
+        <table id="resultsTable">
+            <thead>
+                <tr><th>Nombre</th><th>RUT</th><th>Fecha Nac.</th><th>Previsión</th></tr>
+            </thead>
+            <tbody id="tableBody"></tbody>
+        </table>
+    </div>
 </div>
 
 <script>
-    // Base de datos envuelta correctamente como String y separada por punto y coma (;)
+    /* ================= LÓGICA DE ACCESO ================= */
+    var PIN_CORRECTO = "2026"; // <-- CAMBIA ESTE NÚMERO POR LA CLAVE QUE QUIERAS
+    
+    var loginScreen = document.getElementById('loginScreen');
+    var appContent = document.getElementById('appContent');
+    var pinInput = document.getElementById('pinInput');
+    var loginBtn = document.getElementById('loginBtn');
+    var errorMsg = document.getElementById('errorMsg');
+
+    // Revisar si el usuario ya se había logueado antes en este dispositivo
+    if (localStorage.getItem("accesoPermitido") === "true") {
+        loginScreen.style.display = "none";
+        appContent.style.display = "block";
+    }
+
+    // Función para validar el PIN
+    function validarAcceso() {
+        if (pinInput.value === PIN_CORRECTO) {
+            // Guardar el acceso para no volver a pedirlo
+            localStorage.setItem("accesoPermitido", "true");
+            loginScreen.style.display = "none";
+            appContent.style.display = "block";
+            errorMsg.style.display = "none";
+        } else {
+            errorMsg.style.display = "block";
+            pinInput.value = "";
+        }
+    }
+
+    loginBtn.addEventListener('click', validarAcceso);
+    pinInput.addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') validarAcceso();
+    });
+
+    /* ================= BASE DE DATOS Y BUSCADOR ================= */
     var csvData = `Categoria;Apellidos, Nombres;Rut;F. Nacimiento;Prevision salud;Valores;Base
 SUB-08;Agustin Alonso Vargas Chavez ;26128899-0 ;14/02/2018;FONASA B; $90.900 ;Primer Envio
 SUB-08;Facundo Tomás Aguayo Rojas;26056974-0;01/01/2018;FONASA B; $90.900 ;Primer Envio
@@ -336,20 +393,16 @@ SUB-16;Alan Miguel Altamirano Calistro ;23335159-8;25/05/2010;FONASA B; 90.900 ;
 SUB-16;Eder Zenon Altamirano Calistro;23335180-6;25/05/2010;FONASA B; 90.900 ; Septimo Envio
 ;Stefania Maturana;24110611-k;;FONASA B; 90.900 ; Octavo Envio`;
 
-    // Procesador adaptado para separar por punto y coma (;)
     function parseCSV(text) {
         var lines = text.split('\n');
         var result = [];
-        
         for (var i = 1; i < lines.length; i++) {
             var line = lines[i].trim();
             if (!line) continue;
             
-            var cols = line.split(';'); // <--- Cambiado de ',' a ';'
+            var cols = line.split(';');
             if (cols.length >= 5) {
-                // Si la fecha viene vacía, mostrar "Sin registro"
                 var fechaOriginal = cols[3] ? cols[3].trim() : "Sin registro";
-                
                 result.push({
                     nombre: (cols[1] || "").trim(),
                     rut: (cols[2] || "").trim(),
@@ -365,7 +418,6 @@ SUB-16;Eder Zenon Altamirano Calistro;23335180-6;25/05/2010;FONASA B; 90.900 ; S
     var searchInput = document.getElementById('searchInput');
     var tableBody = document.getElementById('tableBody');
 
-    // Limpieza de acentos 100% compatible
     function normalizeText(str) {
         if (!str) return "";
         var map = {
