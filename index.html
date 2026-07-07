@@ -6,6 +6,11 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>Consulta Deportistas</title>
+    
+    <script src="https://www.gstatic.com/firebasejs/10.1.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.1.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.1.0/firebase-firestore-compat.js"></script>
+
     <style>
         :root { --ios-bg: #f2f2f7; --header-bg: #ffffff; --accent-green: #34c759; --accent-blue: #007aff; --error-red: #ff3b30; }
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: var(--ios-bg); margin: 0; transition: background 0.3s ease; }
@@ -14,11 +19,12 @@
         #loginScreen { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: var(--ios-bg); display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 999; padding: 20px; box-sizing: border-box; }
         .login-card { background: white; padding: 30px 20px; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); width: 100%; max-width: 320px; text-align: center; }
         .login-card h2 { margin-top: 0; font-size: 22px; font-weight: 600; margin-bottom: 20px; }
-        .login-input { width: 100%; padding: 15px; border-radius: 10px; border: 1px solid #c6c6c8; font-size: 18px; text-align: center; margin-bottom: 15px; box-sizing: border-box; letter-spacing: 2px; }
+        .login-input { width: 100%; padding: 15px; border-radius: 10px; border: 1px solid #c6c6c8; font-size: 16px; margin-bottom: 15px; box-sizing: border-box; }
         .login-btn { background: var(--accent-blue); color: white; border: none; padding: 15px; width: 100%; border-radius: 10px; font-size: 16px; font-weight: 600; cursor: pointer; }
         .error-msg { color: var(--error-red); font-size: 14px; margin-top: 10px; display: none; }
+        .loading-msg { color: var(--accent-blue); font-size: 14px; margin-top: 10px; display: none; }
 
-        /* CONTENIDO DE LA APP (Oculto por defecto) */
+        /* CONTENIDO DE LA APP */
         #appContent { display: none; padding-top: 70px; }
         
         /* Barra de búsqueda */
@@ -36,17 +42,17 @@
 </head>
 <body>
 
-<!-- Pantalla de Barrera / Login -->
 <div id="loginScreen">
     <div class="login-card">
-        <h2>Acceso Restringido</h2>
-        <input type="password" id="pinInput" class="login-input" placeholder="Ingresa el PIN" inputmode="numeric">
+        <h2>Acceso Privado</h2>
+        <input type="text" id="userInput" class="login-input" placeholder="Usuario (ej: medico@app.local)" autocapitalize="none" autocorrect="off">
+        <input type="password" id="passInput" class="login-input" placeholder="Contraseña">
         <button id="loginBtn" class="login-btn">Entrar</button>
-        <div id="errorMsg" class="error-msg">PIN incorrecto, intenta nuevamente.</div>
+        <div id="errorMsg" class="error-msg">Usuario o contraseña incorrectos.</div>
+        <div id="loadingMsg" class="loading-msg">Sincronizando base de datos...</div>
     </div>
 </div>
 
-<!-- Contenido real de la App -->
 <div id="appContent">
     <div class="sticky-header">
         <input type="text" id="searchInput" class="search-input" placeholder="Buscar por nombre o RUT...">
@@ -63,361 +69,111 @@
 </div>
 
 <script>
-    /* ================= LÓGICA DE ACCESO ================= */
-    var PIN_CORRECTO = "0000"; // <-- CAMBIA ESTE NÚMERO POR LA CLAVE QUE QUIERAS
-    
+    // =========================================================
+    // PEGA AQUÍ TU FIREBASECONFIG ENCONTRADO EN LA CONFIGURACIÓN:
+   const firebaseConfig = {
+  apiKey: "AIzaSyC7QyTMTRl2WdvuK5hf-uzIv-RPr0s5-h8",
+  authDomain: "buscador-c85db.firebaseapp.com",
+  projectId: "buscador-c85db",
+  storageBucket: "buscador-c85db.firebasestorage.app",
+  messagingSenderId: "1083903045830",
+  appId: "1:1083903045830:web:8cf9259e2d144dd112e7c7"
+};
+    // =========================================================
+
+    // Inicializar los servicios de Firebase
+    firebase.initializeApp(firebaseConfig);
+    var auth = firebase.auth();
+    var db = firebase.firestore();
+
+    var dataset = []; // La base de datos se almacena aquí de forma volátil tras el login
+
+    // Referencias a elementos HTML
     var loginScreen = document.getElementById('loginScreen');
     var appContent = document.getElementById('appContent');
-    var pinInput = document.getElementById('pinInput');
+    var userInput = document.getElementById('userInput');
+    var passInput = document.getElementById('passInput');
     var loginBtn = document.getElementById('loginBtn');
     var errorMsg = document.getElementById('errorMsg');
-
-    // Revisar si el usuario ya se había logueado antes en este dispositivo
-    if (localStorage.getItem("accesoPermitido") === "true") {
-        loginScreen.style.display = "none";
-        appContent.style.display = "block";
-    }
-
-    // Función para validar el PIN
-    function validarAcceso() {
-        if (pinInput.value === PIN_CORRECTO) {
-            // Guardar el acceso para no volver a pedirlo
-            localStorage.setItem("accesoPermitido", "true");
-            loginScreen.style.display = "none";
-            appContent.style.display = "block";
-            errorMsg.style.display = "none";
-        } else {
-            errorMsg.style.display = "block";
-            pinInput.value = "";
-        }
-    }
-
-    loginBtn.addEventListener('click', validarAcceso);
-    pinInput.addEventListener('keypress', function(e) {
-        if (e.key === 'Enter') validarAcceso();
-    });
-
-    /* ================= BASE DE DATOS Y BUSCADOR ================= */
-    var csvData = `Categoria;Apellidos, Nombres;Rut;F. Nacimiento;Prevision salud;Valores;Base
-SUB-08;Agustin Alonso Vargas Chavez ;26128899-0 ;14/02/2018;FONASA B; $90.900 ;Primer Envio
-SUB-08;Facundo Tomás Aguayo Rojas;26056974-0;01/01/2018;FONASA B; $90.900 ;Primer Envio
-SUB-08;Renato Vicente Contreras Vargas ;26602494-0;03/12/2018;FONASA B; $90.900 ;Primer Envio
-SUB-11;Bastian Cisternas Gomez;24844303-0;02/01/2015;FONASA B; $90.900 ;Primer Envio
-SUB-18;Danilo Ariel Alarcón Flores;23113694-0;02/09/2009;FONASA B; $90.900 ;Primer Envio
-SUB-18;Max Andrés zuloaga Gallardo;22918080-0;08/01/2009;FONASA B; $90.900 ;Primer Envio
-SUB-18;Emilio alexis valdes Rozas ;22941768-1 ;29/01/2009;FONASA B; $90.900 ;Primer Envio
-SUB-16;Matías Ignacio Yañez Castro ;23215665-1;02/01/2010;FONASA B; $90.900 ;Primer Envio
-SUB-16;yeremy Brandon Antonelo Quiñonez nazareno ;23221885-1;07/01/2010;FONASA B; $90.900 ;Primer Envio
-SUB-19;Fernanda  Sarai Alejandra Romero Pacheco;22450889-1;19/07/2007;FONASA C; $90.900 ;Primer Envio
-SUB-11;Benjamin Antonio Campos Chavez;25180047-2;29/09/2015;FONASA B; $90.900 ;Primer Envio
-SUB-12;Emiliano Ángel Gutiérrez Ampuero ;24649985-3;11/06/2014;FONASA B; $90.900 ;Primer Envio
-SUB-15;juanjose emilio duran toro ;23547247-3;08/01/2011;FONASA B; $90.900 ;Primer Envio
-SUB-16;Martina Paredes Cabrera;23363989-3;08/06/2010;FONASA B; $90.900 ;Primer Envio
-SUB-09;Santiago Rafael Rojas Lopez;27923785-4;18/02/2017;FONASA B; $90.900 ;Primer Envio
-SUB-16;matias gonzalo Rivera cabrera;23270901-4;06/03/2010;FONASA B; $90.900 ;Primer Envio
-SUB-18;Gaspar Ignacio Ausensi Mussa ;22821409-4;08/09/2008;FONASA B; $90.900 ;Primer Envio
-SUB-14;Maite Nuñez Gomez;24095032-4;;FONASA B; $90.900 ;Primer Envio
-SUB-14;Maite  Castro Calderon;24024736-4;;FONASA B; $90.900 ;Primer Envio
-SUB-16;Matías Enrique Hernández Quezada ;23216952-4;06/01/2010;FONASA C; $90.900 ;Primer Envio
-SUB-12;Agustín Alonso Vera Cáceres ;24522975-5;29/01/2014;FONASA B; $90.900 ;Primer Envio
-SUB-13;Matias Maldonado Stage;24157651-5;02/01/2013;FONASA B; $90.900 ;Primer Envio
-SUB-18;Cristian Jesús Matías Cardenas Molina ;22954677-5;17/02/2009;FONASA B; $90.900 ;Primer Envio
-SUB-19;Jazmin  Antonia  Labrin Bueno;22353513-5;16/03/2007;FONASA B; $90.900 ;Primer Envio
-SUB-10;Renato Tapia Brantes;25545081-6;20/10/2016;FONASA B; $90.900 ;Primer Envio
-SUB-11;Héctor Andrés Henríquez Oviedo;26488993-6;10/03/2015;FONASA B; $90.900 ;Primer Envio
-SUB-13;Dante Aliaga Ortega;24225261-6;24/03/2013;FONASA B; $90.900 ;Primer Envio
-SUB-15;Martín Alonso Gutierrez Aliaga ;23556925-6;08/02/2011;FONASA B; $90.900 ;Primer Envio
-SUB-14;Elisa Navarrete Sepulveda;24176398-6;;FONASA D; $90.900 ;Primer Envio
-SUB-10;JAIME DEL PIERO MENDEZ SEPULVEDA;25364447-8;28/04/2016;FONASA B; $90.900 ;Primer Envio
-SUB-10;Martín Elías Aldunate Flores ;25256300-8;13/01/2016;FONASA B; $90.900 ;Primer Envio
-SUB-13;Renato Eduardo Valdivia bray ;24194446-8;14/02/2013;FONASA B; $90.900 ;Primer Envio
-SUB-14;Maday itzae  Muñoz Guajardo;23998909-8;;FONASA B; $90.900 ;Primer Envio
-SUB-12;Martín Román Silva Gallardo;24687647-9;20/07/2014;FONASA B; $90.900 ;Primer Envio
-SUB-19;Thaís  Emilia  Rodriguez Pardo;22965935-9;09/03/2009;FONASA C; $90.900 ;Primer Envio
-SUB-10;Lucas Eduardo Barahona Espinoza ;25364477-K;01/05/2016;FONASA B; $90.900 ;Primer Envio
-SUB-11;Jose Franco Gongora Silva;24993982-k;22/05/2015;FONASA B; $90.900 ;Primer Envio
-SUB-11;Zantino Ignacio Etchebest Araya ;24851566-k;07/01/2015;FONASA B; $90.900 ;Primer Envio
-SUB-13;Neymar Mosquera Cardenas ;25945798-k;25/09/2013;FONASA B; $90.900 ;Primer Envio
-SUB-15;Wladimir Antonio González Escobar ;23621415-k;17/04/2011;FONASA B; $90.900 ;Primer Envio
-SUB-16;Moira Diaz Soto;23421537-K;10/09/2010;FONASA B; $90.900 ;Primer Envio
-SUB-11;Fidel Sanchez Fuentes ;24892926-K;06/02/2015;FONASA B; $90.900 ;Primer Envio
-SUB-13;Alvaro Ignacio Hinojosa  Suarez;24170662-1;18/01/2013;FONASA C; $90.900 ;Primer Envio
-SUB-13;Eduardo José coronel pinzon ;26270306-1;28/05/2013;FONASA C; $90.900 ;Primer Envio
-SUB-16;Julián Agustín Muñoz Flores ;23224088-1;11/01/2010;FONASA C; $90.900 ;Primer Envio
-SUB-16;Antonella Curillan Millanao;23547721-1;30/01/2011;FONASA D; $90.900 ;Primer Envio
-SUB-08;Mateo Alonso Coronado Morales;26140985-2;22/02/2018;FONASA C; $90.900 ;Primer Envio
-SUB-09;Benjamín Ariel Candia Araya;25943880-2;15/10/2017;FONASA C; $90.900 ;Primer Envio
-SUB-12;Facundo Andres Campos Pinto;24529869-2;04/02/2014;FONASA C; $90.900 ;Primer Envio
-SUB-12;MATHIAS JOEL QUERO FERRER;26514690-2;20/02/2014;FONASA C; $90.900 ;Primer Envio
-SUB-15;Mateo Francisco Zapata Rubilar;23707071-2;23/07/2011;FONASA C; $90.900 ;Primer Envio
-SUB-16;Agustín Alfonso Riquelme Rodríguez ;23351592-2;18/06/2010;FONASA C; $90.900 ;Primer Envio
-SUB-11;Alonso Felipe Díaz Muñoz;24844016-3;02/01/2015;FONASA C; $90.900 ;Primer Envio
-SUB-16;Amaro Jafet Sepulveda franco ;23489074-3;22/11/2010;FONASA C; $90.900 ;Primer Envio
-SUB-14;Emilia  Soto Zamorano;23897719-3;;FONASA C; $90.900 ;Primer Envio
-SUB-16;Antonella Araya Abarca;23674659-3;21/06/2011;FONASA C; $90.900 ;Primer Envio
-SUB-16;Victoria Carvajal Gongora;24039357-3;17/08/2012;FONASA C; $90.900 ;Primer Envio
-SUB-16;Emilia Soto Zamorano;23897719-3;13/03/2012;FONASA C; $90.900 ;Primer Envio
-SUB-19;Jeniffer  Constanza  Núñez Allende;22759101-3;01/07/2008;FONASA C; $90.900 ;Primer Envio
-SUB-14;Victoria Carvajal Gongora;24039357-3;;FONASA D; $90.900 ;Primer Envio
-SUB-10;Alonso Ignacio Ocares Muñoz ;25311055-4;07/03/2016;FONASA C; $90.900 ;Primer Envio
-SUB-10;Facundo Marquez Garcia;25393028-4;28.05.2016;FONASA C; $90.900 ;Primer Envio
-SUB-13;Pedro Andrés Klause Sepúlveda ;24161370-4;07/01/2026;FONASA C; $90.900 ;Primer Envio
-SUB-18;Leonidas Gutierrez;22636941-4;04/02/2008;FONASA C; $90.900 ;Primer Envio
-SUB-19;Lia  Amaral  Cruz Rusque;23061741-4;28/06/2009;FONASA C; $90.900 ;Primer Envio
-SUB-08;Kellan Vallejo Cáceres;26354025-5;03/07/2018;FONASA C; $90.900 ;Primer Envio
-SUB-08;Santiago Baltazar Silva Venegas ;26120242-5;11/02/2018;FONASA C; $90.900 ;Primer Envio
-SUB-13;Cristian Valenzuela Constanzo;24178208-5;26/01/2013;FONASA C; $90.900 ;Primer Envio
-SUB-14;martina  Mejias gaete;23915196-5;;FONASA C; $90.900 ;Primer Envio
-SUB-14;Kelly  Hermosilla Veliz;24153681-5;;FONASA C; $90.900 ;Primer Envio
-SUB-19;Isidora  Ignacia  Vasquez Diaz;22555834-5;20/11/2007;FONASA C; $90.900 ;Primer Envio
-SUB-15;Daniel Yohel Rojas Sasso;23707715-6 ;01/08/2011;FONASA C; $90.900 ;Primer Envio
-SUB-10;Pablo Alonso alarcon farias;25335046-6;31/03/2016;FONASA C; $90.900 ;Primer Envio
-SUB-10;PEDRO EDUARDO DE LA CARRERA GONZALEZ;25499929-6;06/09/2016;FONASA C; $90.900 ;Primer Envio
-SUB-14;Jorge Tomás Higuera Matus ;23996160-6;27/06/2012;FONASA C; $90.900 ;Primer Envio
-SUB-16;Cristian Melo Garrido;23270234-6;13/03/2010;FONASA C; $90.900 ;Primer Envio
-SUB-08;Álvaro Exequiel Torres Herrera ;26087046-7;19/01/2018;FONASA C; $90.900 ;Primer Envio
-SUB-11;Damián Erick Gatica Maldonado;24957297-7;16/04/2015;FONASA C; $90.900 ;Primer Envio
-SUB-11;Cristóbal Emilio Pérez Alfaro;24893947-8;09/02/2015;FONASA C; $90.900 ;Primer Envio
-SUB-14;Kevin Alejandro Jaramillo Muñoz ;23970003-9;01/06/2012;FONASA C; $90.900 ;Primer Envio
-SUB-14;Luciano Oyarzún Lopez ;24147098-9;19/12/2012;FONASA C; $90.900 ;Primer Envio
-SUB-15;Jairo Osulivan Chacon Silva ;28136791-9;03/02/2011;FONASA C; $90.900 ;Primer Envio
-SUB-16;Cristopher Stevens Morales Águila ;23216258-9;06/01/2010;FONASA C; $90.900 ;Primer Envio
-SUB-18;Maximo Renato Oyarzun Lopez;22697288-9;15/04/2008;FONASA C; $90.900 ;Primer Envio
-SUB-19;Isabel  Estefania  Cabrera Barriga;23018148-9;12/05/2009;FONASA D; $90.900 ;Primer Envio
-SUB-16;Dominique Lanber Ampuero;23461438-K;19/10/2010;FONASA B; $90.900 ;Primer Envio
-SUB-10;Agustín Baltazar Veas Graavendaal;25277816-0;03/02/2016;FONASA D; $90.900 ;Primer Envio
-SUB-12;Mateo Alonso Gutierrez Muñoz;24644585-0;06/06/2014;FONASA D; $90.900 ;Primer Envio
-SUB-13;Joaquin Rozas Oliva ;24482845-0;16/12/2013;FONASA D; $90.900 ;Primer Envio
-SUB-14;Valentín Antonio Monárdez Álvarez ;24069775-0;21/09/2012;FONASA D; $90.900 ;Primer Envio
-SUB-14;Baltazar Alonso Orellana Valladares;23914240-0;30/03/2012;FONASA D; $90.900 ;Primer Envio
-SUB-15;Matias Jesús Mijares Cabrera ;25091385-0;06/01/2011;FONASA D; $90.900 ;Primer Envio
-SUB-14;Camila Rodriguez Aguilar;24042222-0;;FONASA D; $90.900 ;Primer Envio
-SUB-14;Agustina Saldías Vicencio;24387086-0;;FONASA D; $90.900 ;Primer Envio
-SUB-14;Amalia Manosalva castro;24306711-1;;FONASA C; $90.900 ;Primer Envio
-SUB-08;adonay jose Pacheco Rodríguez;26583386-1;19/11/2018;FONASA D; $90.900 ;Primer Envio
-SUB-10;Gaspar Alejandro Rubio Benavides ;25425650-1;25/06/2016;FONASA D; $90.900 ;Primer Envio
-SUB-14;Sebastian Santaella Pabon;26965708-1;04/05/2012;FONASA D; $90.900 ;Primer Envio
-SUB-16;Constanza Gonzalez Rivera;23430866-1;18/09/2010;FONASA D; $90.900 ;Primer Envio
-SUB-08;Thiago José Ruiz Quintana ;27030954-2;17/03/2018;FONASA D; $90.900 ;Primer Envio
-SUB-10;Tomas Alexander Muñoz Guzman;25381995-2;18/05/2016;FONASA D; $90.900 ;Primer Envio
-SUB-10;Tyan Gabriel Zizu Piñeiro Sanchez;26220612-2;04/10/2016;FONASA D; $90.900 ;Primer Envio
-SUB-12;León Santiago Hernández Moya ;24591912-3 ;12/04/2014;FONASA D; $90.900 ;Primer Envio
-SUB-09;Gaspar Miranda Veliz ;25669104-3;09/02/2017;FONASA D; $90.900 ;Primer Envio
-SUB-13;Salomón Martínez Lovera ;26007974-3;05/12/2013;FONASA D; $90.900 ;Primer Envio
-SUB-16;Matías Alonso Zúñiga cruz ;23279395-3;21/03/2010;FONASA D; $90.900 ;Primer Envio
-SUB-18;Agusthin Nicolás Peñaloza Bravo;23016078-3;11/05/2009;FONASA D; $90.900 ;Primer Envio
-SUB-16;Lía Peña Perez;23791366-3;10/11/2011;FONASA D; $90.900 ;Primer Envio
-SUB-11;Santiago Muñoz Ruiz ;24952393-3;09/04/2015;FONASA D; $90.900 ;Primer Envio
-SUB-16;Anhaí Andrade González;23376104-4;19/07/2010;FONASA C; $90.900 ;Primer Envio
-SUB-10;Cristobal Martinez Lovera;26008010-5 ;21/03/2016;FONASA D; $90.900 ;Primer Envio
-SUB-19;Izabella  Nayivy  Morales Contreras;27231498-5;15/07/2008;FONASA B; $90.900 ;Primer Envio
-SUB-08;Cristóbal Alejandro Hernández Allendes;26582493-5;23/11/2018;FONASA D; $90.900 ;Primer Envio
-SUB-09;Héctor Ignacio Quinteros Angulo;25823504-5;03/07/2017;FONASA D; $90.900 ;Primer Envio
-SUB-14;Vicente Benjamin Ibarbe Pinto;23879607-5;21/02/2012;FONASA D; $90.900 ;Primer Envio
-SUB-13;Pablo Antonio Meneses lucaro;24348543-6;01/08/2026;FONASA D; $90.900 ;Primer Envio
-SUB-16;Cathalina Lara Guerrero;23349774-6;10/06/2010;FONASA D; $90.900 ;Primer Envio
-SUB-14;Anastasia Guajardo Fernandez;24012690-7;;FONASA C; $90.900 ;Primer Envio
-SUB-09;Justin Leandro Galindo Lemus;25918773-7;23/09/2017;FONASA D; $90.900 ;Primer Envio
-SUB-11;Nahuel Andrés Quiroga Quezada ;24938572-7;25/03/2015;FONASA D; $90.900 ;Primer Envio
-SUB-13;Lucas Lionel Emiliano Pizarro Yañez;24204269-7;26/02/2013;FONASA D; $90.900 ;Primer Envio
-SUB-14;Maite  Luengo Mondaca;24505981-7;;FONASA D; $90.900 ;Primer Envio
-SUB-19;Maite  Andrea  Martinez Valladares;22311910-7;20/01/2007;FONASA D; $90.900 ;Primer Envio
-SUB-14;Alanis Carvajal Rizo;26940818-9;;FONASA B; $90.900 ;Primer Envio
-SUB-08;Dylan Oziel Villameriel Brito;26910427-9;17/01/2018;FONASA D; $90.900 ;Primer Envio
-SUB-10;Maximiliano Antonio González Rivera;25536998-9;13/10/2016;FONASA D; $90.900 ;Primer Envio
-SUB-14;Kathia Vidal Farias;24075917-9;;FONASA D; $90.900 ;Primer Envio
-SUB-16;Amaral Farias Torres;23225977-9;08/01/2010;FONASA D; $90.900 ;Primer Envio
-SUB-14;Matías Sebastián rojas González ;23857515-K ;28/01/2012;FONASA D; $90.900 ;Primer Envio
-SUB-14;Dominique Richter Ramirez;24224463-k;;FONASA C; $90.900 ;Primer Envio
-SUB-10;Matías Gabriel Peña Hormazábal;25303582-k;01/03/2016;FONASA D; $90.900 ;Primer Envio
-SUB-14;Dylan Francisco Tello Torres;24044111-K;22/08/2012;FONASA D; $90.900 ;Primer Envio
-SUB-16;Alonso Felipe Gajardo anabalón;23221192-k;12/01/2010;FONASA D; $90.900 ;Primer Envio
-SUB-18;Anien Castillo Rojas;22967501-k;06/03/2009;FONASA D; $90.900 ;Primer Envio
-SUB-16;Emilia Ávila Henríquez;23741800-K;06/09/2010;FONASA D; $90.900 ;Primer Envio
-SUB-10;Vicente Antonio González Cortés ;25524017-K;28/09/2016;FONASA D; $90.900 ;Primer Envio
-SUB-14;Pascuala Gomez Valdes;24013402-0;;FONASA C; $90.900 ;Primer Envio
-SUB-14;Mateo exequiel aguilera valenzuela ;23851799-0;19/01/2012;FONASA C; $90.900 ;Primer Envio
-SUB-18;Gaspar Núñez ;22752269-0;24/06/2008;FONASA D; $90.900 ;Primer Envio
-SUB-14;Agustín Alonso sepulveda rosas;23839733-2;02/01/2012;FONASA B; $90.900 ;Primer Envio
-SUB-12;Emiliano Orellana Núñez ;24698491-3;29/07/2014;FONASA B; $90.900 ;Primer Envio
-SUB-12;Julián Agustín Dumas Conejeros ;24613102-3;05/05/2014;FONASA B; $90.900 ;Primer Envio
-SUB-14;Josefa  Mellado Villagra;24513159-3;;FONASA B; $90.900 ;Primer Envio
-SUB-15;Benjamin gabriel villanueva ruiz ;23555176-4;06/02/2011;FONASA B; $90.900 ;Primer Envio
-SUB-14;Martin Alonso Valdivia Becerra ;24039737-4;17/08/2012;FONASA C; $90.900 ;Primer Envio
-SUB-15;Lucas Emilio Ramos barrera;23568296-6;24/02/2011;FONASA B; $90.900 ;Primer Envio
-SUB-15;Amaro Delgado ;23583039-6;03/03/2011;FONASA D; $90.900 ;Primer Envio
-SUB-14;Jeremias Benjamin Herrera Tobar;23867858-7;07/02/2012;FONASA B; $90.900 ;Primer Envio
-SUB-09;Luis Martín parada moreno;25710084-7;10/03/2017;FONASA C; $90.900 ;Primer Envio
-SUB-14;Polo Evans Orellana Vidal;23923510-7;12/04/2012;FONASA C; $90.900 ;Primer Envio
-SUB-18;Franco joao vega alfaro;22688236-7;06/04/2008;FONASA D; $90.900 ;Primer Envio
-SUB-09;Facundo Simón Pérez Rivas ;25770762-8;16/05/2017;FONASA D; $90.900 ;Primer Envio
-SUB-15;Patricio Said Laguna Halabi;23442826-8;03/10/2010;FONASA D; $90.900 ;Primer Envio
-SUB-15;Tomás Alonso Córdova Sáez ;23630284-9;28/04/2011;FONASA C; $90.900 ;Primer Envio
-SUB-09;Santiago Alonso Fierro Torres;25772601-0;22/05/2017;ISAPRE; $71.900 ;Primer Envio
-SUB-12;Santino Emiliano Valenzuela Ramos ;24620352-0;08/05/2014;ISAPRE; $71.900 ;Primer Envio
-SUB-16;Pablo Jeremías lasnibat Latuz ;23422890-0;13/09/2010;ISAPRE; $71.900 ;Primer Envio
-SUB-09;Facundo Andrés castillo corrales ;25726158-1 ;04/04/2017;ISAPRE; $71.900 ;Primer Envio
-SUB-10;Andres Alonso Solano Leon;25424093-1;28/06/2016;ISAPRE; $71.900 ;Primer Envio
-SUB-13;Vicente Alfredo Ahumada Serra;24276853-1;12/05/2013;ISAPRE; $71.900 ;Primer Envio
-SUB-16;Catalina Muñoz Miranda;23337880-1;26/05/2010;ISAPRE; $71.900 ;Primer Envio
-SUB-08;Salvador Bautista Salinas Arrué ;26071442-2;11/01/2018;ISAPRE; $71.900 ;Primer Envio
-SUB-09;Agustín Ignacio Casas-Cordero Salas ;25937609-2;09/10/2017;ISAPRE; $71.900 ;Primer Envio
-SUB-09;Vicente Tomás Pérez Vilches ;25715748-2;10/03/2017;ISAPRE; $71.900 ;Primer Envio
-SUB-11;IGNACIO ALONSO MANRIQUEZ TORRES;24877476-2;24/01/2015;ISAPRE; $71.900 ;Primer Envio
-SUB-11;Máximo Agustín Farías villela;25118132-2;13/09/2015;ISAPRE; $71.900 ;Primer Envio
-SUB-12;Lucas Enrique Pereda torres;24581017-2;25/03/2014;ISAPRE; $71.900 ;Primer Envio
-SUB-14;Florencia Diaz Peralta;24507502-2;;ISAPRE; $71.900 ;Primer Envio
-SUB-14;Catalina Vega Fuentes;23975442-2;;ISAPRE; $71.900 ;Primer Envio
-SUB-14;Catalina Porcher medina;23925771-2;;ISAPRE; $71.900 ;Primer Envio
-SUB-16;Emilia Karamanoff Sepulveda;23285271-2;26/03/2010;ISAPRE; $71.900 ;Primer Envio
-SUB-08;Diego Alonso Uribe Palma;26172732-3;14/03/2018;ISAPRE; $71.900 ;Primer Envio
-SUB-09;Gaspar Hernán Lira Silva;25650262-3;26/01/2017;ISAPRE; $71.900 ;Primer Envio
-SUB-12;Santiago Neira Morales;24515185-3;21/01/2014;ISAPRE; $71.900 ;Primer Envio
-SUB-13;Tomas Andres Figueroa Herrera;24111433-3;11/11/2012;ISAPRE; $71.900 ;Primer Envio
-SUB-15;Bautista Santino Correa;47007926-3;27/04/2011;ISAPRE; $71.900 ;Primer Envio
-SUB-14;Emilia Zepeda Gomez;24184835-3;;ISAPRE; $71.900 ;Primer Envio
-SUB-09;Mariano Carlos Uslar Sáez;25668834-4;10/02/2017;ISAPRE; $71.900 ;Primer Envio
-SUB-14;Gastón Araya Cox;23862850-4;05/02/2012;ISAPRE; $71.900 ;Primer Envio
-SUB-18;Agustin Ignacio Silva Nuñez ;22786273-4;06/08/2008;ISAPRE; $71.900 ;Primer Envio
-SUB-11;Santiago Jose Torrejón Díaz ;24964526-5 ;22/04/2015;ISAPRE; $71.900 ;Primer Envio
-SUB-13;Javier Arturo landrian rivas;26083337-5;06/02/2013;ISAPRE; $71.900 ;Primer Envio
-SUB-14;SANTIAGO BENJAMIN MELO MUÑOZ;23935352-5;27/04/2012;ISAPRE; $71.900 ;Primer Envio
-SUB-15;Renato Benjamin Pintó Retamales ;23536831-5;19/01/2011;ISAPRE; $71.900 ;Primer Envio
-SUB-16;Camila Orozco Huerta;23310711-5;02/05/2010;ISAPRE; $71.900 ;Primer Envio
-SUB-19;Constanza  Andrea  Parada Rojas;22568406-5;06/12/2007;ISAPRE; $71.900 ;Primer Envio
-SUB-19;Fernanda  Carolina  Alvarez Ortega;22098989-5;20/04/2006;ISAPRE; $71.900 ;Primer Envio
-SUB-12;Juan Sebastián Pérez muñoz ;24846838-6;29/12/2014;ISAPRE; $71.900 ;Primer Envio
-SUB-12;Mateo Maximiliano Martínez Araya ;24600761-6;21/04/2014;ISAPRE; $71.900 ;Primer Envio
-SUB-16;Francisca Godoy Berguño;23321179-6;15/05/2010;ISAPRE; $71.900 ;Primer Envio
-SUB-11;Santiago Alessandro Suarez Duque ;26460215-7 ;16/04/2015;ISAPRE; $71.900 ;Primer Envio
-SUB-08;Carlos Jesús Uribe Palma ;26172758-7;14/03/2018;ISAPRE; $71.900 ;Primer Envio
-SUB-11;Baltasar Salvador Arrué Ebner;24906097-7;16/02/2015;ISAPRE; $71.900 ;Primer Envio
-SUB-12;Lucas Joel Torres Soto;24574069-7;20/03/2014;ISAPRE; $71.900 ;Primer Envio
-SUB-12;Matias Eduardo Lobos Espinoza ;24536504-7;14/02/2014;ISAPRE; $71.900 ;Primer Envio
-SUB-14;Magdalena Pino Hernandz;24150424-7;;ISAPRE; $71.900 ;Primer Envio
-SUB-14;Martina Paz Carrasco Walther;24199073-7;;ISAPRE; $71.900 ;Primer Envio
-SUB-14;Olivia Galvez Vives;24055524-7;;ISAPRE; $71.900 ;Primer Envio
-SUB-16;Maite Bustos Araya;23790053-7;05/11/2011;ISAPRE; $71.900 ;Primer Envio
-SUB-16;Trinidad Araya Urdanivia;23649547-7;21/05/2011;ISAPRE; $71.900 ;Primer Envio
-SUB-09;Julián Emilio Ruiz Muñoz ;25771720-8;19/05/2017;ISAPRE; $71.900 ;Primer Envio
-SUB-10;DIEGO ALONSO FUENTES SANDOVAL;25297607-8;25/02/2016;ISAPRE; $71.900 ;Primer Envio
-SUB-13;Simon Guzman Cardenas;24370315-8;22/08/2013;ISAPRE; $71.900 ;Primer Envio
-SUB-18;Dante Alonzo Squicciarini Martinez ;22645524-8;10/02/2008;ISAPRE; $71.900 ;Primer Envio
-SUB-14;Antonia Allendes Campos;24730747-8;;ISAPRE; $71.900 ;Primer Envio
-SUB-19;Martina  Antonia  Escudero Guajardo;22246418-8;27/10/2006;ISAPRE; $71.900 ;Primer Envio
-SUB-10;Benjamin Alexander Ferrada Sepulveda;25366223-9;03/05/2016;ISAPRE; $71.900 ;Primer Envio
-SUB-11;Damián Moraga Peralta;24989164-9;20/05/2015;ISAPRE; $71.900 ;Primer Envio
-SUB-16;CHRISTIAN ALONSO MUÑOZ LORCA;23231262-9;17/01/2010;ISAPRE; $71.900 ;Primer Envio
-SUB-14;Maria Martinez Gil;27118082-9;;ISAPRE; $71.900 ;Primer Envio
-SUB-14;Emilia Pinto Jáuregui;24051584-9;;ISAPRE; $71.900 ;Primer Envio
-SUB-10;Emilio Alonso Marschhausen Vera;25381991-k;19/05/2016;ISAPRE; $71.900 ;Primer Envio
-SUB-14;Amalia Parra Alarcon;24036008-k;;ISAPRE; $71.900 ;Primer Envio
-SUB-19;Monserrat  Elizabeth  Escobar Lazo;22491248-K;04/09/2007;ISAPRE; $71.900 ;Primer Envio
-SUB-19;Antonia  Ignacia  Moreno Romero;22491928-K;05/09/2007;ISAPRE; $71.900 ; Primer Envio
-SUB-18;Vicente Augusto Naranjo Romero;23073761-4;02/07/2009;ISAPRE; $71.900 ; Segundo Envio
-SUB-20;Paolo Vittorio Castro Mincone;22577507-9;30/11/2007;ISAPRE; $71.900 ; Segundo Envio
-SUB-18;Juan Valenzuela Cortes ;22616702-1;18/01/2008;ISAPRE; $71.900 ; Segundo Envio
-SUB-20;Martín Ignacio Ortiz Arratia ;22420160-5;16/06/2007;ISAPRE; $71.900 ; Segundo Envio
-SUB-18;Franco Garrido ;22821126-5;13/09/2008;ISAPRE; $71.900 ; Segundo Envio
-SUB-20;Felipe Ignacio valdivia López ;22019362-4;10/01/2006;FONASA B; $90.900 ; Segundo Envio
-SUB-20;Pablo Andrés Ugarte donoso ;22371769-1;11/04/2007;FONASA B; $90.900 ; Segundo Envio
-SUB-20;Tomas Alonso Medina rojas ;22156132-5;04/07/2006;FONASA B; $90.900 ; Segundo Envio
-SUB-14;Inostroza Emilia ;23876797-0;05/01/2012;FONASA B; $90.900 ; Segundo Envio
-SUB-20;Nicolas Vicente opazo Ferrer ;22337041-1;18/02/2007;FONASA B ; $90.900 ; Segundo Envio
-SUB-18;Daniel Alejandro González Cáceres ;22684676-k ;03/04/2008;FONASA C; $90.900 ; Segundo Envio
-SUB-18;Maximiliano Octavio Lanber Ampuero;23050134-3;15/06/2009;FONASA C; $90.900 ; Segundo Envio
-SUB-20;Juliano mateo Méndez Vilches ;22479280-8;18/08/2007;FONASA C; $90.900 ; Segundo Envio
-SUB-14;Cruzat Maite ;24491367-9;24/12/2013;FONASA C; $90.900 ; Segundo Envio
-SUB-20;Gabriel Morales;22058994-3;19/02/2006;FONASA D; $90.900 ; Segundo Envio
-SUB-20;Maximiliano Aaron Muñoz Torres ;22413023-6;02/06/2007;FONASA D; $90.900 ; Segundo Envio
-SUB-14;Valden Muñoz Josefa ;24084851-1;05/10/2012;FONASA D; $90.900 ; Segundo Envio
-SUB-20;vicente mauricio rivas gallardo ;22473001-2;05/08/2007;FONASA D ; $90.900 ; Segundo Envio
-SUB-20;Mauro  Ibarra ;22122926-6;21/05/2006;ISAPRE; $71.900 ; Segundo Envio
-SUB-14;Darek Patricio Ramírez Avila ;23874182-3;17/02/2012;FONASA B; $90.900 ; Tercer Envio
-SUB-14;Alex Javier Jeame Manquemilla ;23927660-1;16/04/2012;FONASA B; $90.900 ; Tercer Envio
-SUB-16;Cristopher Pérez Salas;23360649-9;25/06/2010;FONASA B; $90.900 ; Tercer Envio
-SUB-16;Leon Arturo Villa Fica ;23418512-8;02/09/2010;FONASA B; $90.900 ; Tercer Envio
-SUB-18;Bastian Sanchez Poblete ;23047837-6;09/06/2009;FONASA B; $90.900 ; Tercer Envio
-SUB-11;Martin Ceron Moya;25039652-K;01/07/2015;FONASA B; $90.900 ; Tercer Envio
-SUB-08;BARUJ ISRAEL BUSTOS CARMONA ;26 279.063-0;14/05/2018;FONASA B ; 90.900 ; Cuarto Envio
-SUB-09;Julián Francisco Lobos Vargas;25850181-0;27/07/2017;FONASA B; 90.900 ; Cuarto Envio
-SUB-10;Thiago franshesco Soto acuña ;25.377.114-3;12/05/2016;FONASA B; 90.900 ; Cuarto Envio
-SUB-12;Simón Francisco Zamorano Gonzalez;24.644.723-3;08/06/2014;FONASA B; 90.900 ; Cuarto Envio
-SUB-10;Lucas Antonio Andrade Contreras ;25.273.925-4;02/02/2016;FONASA B; 90.900 ; Cuarto Envio
-SUB-08;Esteban Ignacio Vásquez Vásquez ;26.102.193-5;25/01/2018;FONASA B; 90.900 ; Cuarto Envio
-SUB-12;Milan Alessandro Fonseca gonzalez;24.818.532-5;06/12/2014;FONASA B; 90.900 ; Cuarto Envio
-SUB-15;Bruno Alonso Valenzuela Conejeros ;23745283-6;14/09/2011;FONASA B; 90.900 ; Cuarto Envio
-SUB-14;Lucas  Simón, Gonzalez González;23.992.603-7;26/06/2012;FONASA B; 90.900 ; Cuarto Envio
-SUB-15;Agustín Thomas Ordenes Armijo;23604284-7;18/03/2011;FONASA B; 90.900 ; Cuarto Envio
-SUB-12;Enrique esai beiza salinas ;24532346-8;09/02/2014;FONASA B; 90.900 ; Cuarto Envio
-SUB-10;Gaspar León Garrido cadenas ;25.490.208-k;28/08/2016;FONASA B; 90.900 ; Cuarto Envio
-SUB-12;Alexis humberto cid arrechea;24.684.822-k ;11/07/2014;FONASA B; 90.900 ; Cuarto Envio
-SUB-12;Benjamín Felipe Muñoz Martínez ;24.606.637-K;26/04/2014;FONASA B; 90.900 ; Cuarto Envio
-SUB-10;Agustín Elías Alfredo Blas Uribe;25.277.658-3;06/02/2016;FONASA C; 90.900 ; Quinto Envio
-SUB-10;Mateo Iván Cortez Farías ;25.247.509-5;06/01/2016;FONASA B; 90.900 ; Quinto Envio
-SUB-10;Ethan Figuera Hernandez;25385365-4;24/05/2016;FONASA B; 90.900 ; Quinto Envio
-SUB-11;Damián Emilio Suárez Leal;25028840-9;30/06/2015;FONASA B; 90.900 ; Quinto Envio
-SUB-13;Amaro Adolfo Cortez Farías ;24.347.146-k;30/07/2013;FONASA B; 90.900 ; Quinto Envio
-SUB-14;Matias nicolas hernandez salgado;23.852.615-9;20/01/2012;FONASA B; 90.900 ; Quinto Envio
-SUB-16;Felipe Andres Raipan Olave;23264117-7;03/03/2010;FONASA B; 90.900 ; Quinto Envio
-SUB-08;Sergio Ignacio Cáceres Parra ;26.136.618-5;22/02/2018;FONASA B; 90.900 ; Quinto Envio
-SUB-11;Stefano emiliano torres gonzalez;24.964.871-k;21/04/2015;FONASA B; 90.900 ; Quinto Envio
-SUB-12;Luciano Martin Alejandro Chacano Carvajal;21.344.651-7;25/01/2014;FONASA C; 90.900 ; Quinto Envio
-SUB-13;Alonso Salinas Bustos;24155462-7;03/01/2013;FONASA B; 90.900 ; Quinto Envio
-SUB-13;Cristian Miguel Astorga Galaz;24.247.443-0;16/04/2013;FONASA B; 90.900 ; Quinto Envio
-SUB-13;Franco Lorenzo Medina Alruiz;24.200.289-k;13/02/2013;COLMENA; 71.900 ; Quinto Envio
-SUB-15;Martin Alarcón Sobarzo ;23.567.417-3;22/02/2011;FONASA C; 90.900 ; Quinto Envio
-SUB-08;Salvador Daniel San Martin Terraza;26.245.347-2;24/04/2018;FONASA C; 90.900 ; Quinto Envio
-SUB-09;Gabriel Alexander Gomez Villanueva ;25.791.579-4;04/06/2017;FONASA B; 90.900 ; Quinto Envio
-SUB-09;Angelo Agustín Araya amigo ;25.648.987-2;20/01/2017;FONASA B; 90.900 ; Quinto Envio
-SUB-10;Agustín Antonio morales gallegos ;25.264.874-7;25/01/2016;FONASA B; 90.900 ; Quinto Envio
-SUB-10;Dante Nehemías Barra Aceituno;25245806-9;10/01/2016;FONASA B ; 90.900 ; Quinto Envio
-SUB-11;Damián Sebastian Vergara Rojas ;25.035.847-4;04/07/2015;FONASA B; 90.900 ; Quinto Envio
-SUB-11;Patricio alejandro asenjo astudillo ;24.845.188-2;01/01/2015;FONASA B; 90.900 ; Quinto Envio
-SUB-11;Vicente Fuentes Cabeza;24934566-0;22/03/2015;FONASA B; 90.900 ; Quinto Envio
-SUB-11;Mathias Alejandro González Graterol ;28182063-k;06/01/2015;FONASA B; 90.900 ; Quinto Envio
-SUB-12;Tomás Alonso Véliz Gaete;24.737.543-0;07/09/2014;FONASA B; 90.900 ; Quinto Envio
-SUB-13;Lucas Moisés Apablaza Lara ;24263991-k;28/04/2013;FONASA B; 90.900 ; Quinto Envio
-SUB-15;Jared Paredes Cea;23.638.298-2;07/06/2011;FONASA B; 90.900 ; Quinto Envio
-SUB-18;Ian Mauricio Minguez Arenas;22956363-7;26/02/2009;BANMEDICA; 71.900 ; Quinto Envio
-SUB-18;Endrik Alexander Mercado Almaraz ;28557995-3;18/02/2009;FONASA C; 90.900 ; Quinto Envio
-SUB-18;Jostin Alexis Muñoz Barros;22.743.221-7;11/06/2008;FONASA B; 90.900 ; Quinto Envio
-SUB-08;Lucas Agustín salas Sandoval ;26.433.605-8;17/08/2018;FONASA B; 90.900 ; Sexto Envio
-SUB-12;Martín Alonso Acevedo fuentes;24783960-7;30/10/2014;FONASA B; 90.900 ; Sexto Envio
-SUB-15;Amaro Ezequiel Contreras Fonseca ;23.519.543-7;05/01/2011;FONASA B; 90.900 ; Sexto Envio
-SUB-15;Donato Giles Menéndez ;25.197.233-8;14/06/2011;FONASA D; 90.900 ; Sexto Envio
-SUB-16;Diego Andrés Acevedo fuentes;23304711-2;24/04/2010;FONASA B; 90.900 ; Sexto Envio
-SUB-14;Maximiliano Carvajal Pulgar ;23942714-6;30/04/2012;FONASA D; 90.900 ; Septimo Envio
-SUB-14;Nicolas Monkeberg Cruz;23.803.645-3;17/11/2011;COLMENA; 71.900 ; Septimo Envio
-SUB-16;Alan Miguel Altamirano Calistro ;23335159-8;25/05/2010;FONASA B; 90.900 ; Septimo Envio
-SUB-16;Eder Zenon Altamirano Calistro;23335180-6;25/05/2010;FONASA B; 90.900 ; Septimo Envio
-;Stefania Maturana;24110611-k;;FONASA B; 90.900 ; Octavo Envio`;
-
-    function parseCSV(text) {
-        var lines = text.split('\n');
-        var result = [];
-        for (var i = 1; i < lines.length; i++) {
-            var line = lines[i].trim();
-            if (!line) continue;
-            
-            var cols = line.split(';');
-            if (cols.length >= 5) {
-                var fechaOriginal = cols[3] ? cols[3].trim() : "Sin registro";
-                result.push({
-                    nombre: (cols[1] || "").trim(),
-                    rut: (cols[2] || "").trim(),
-                    fecha: fechaOriginal,
-                    prevision: (cols[4] || "").trim()
-                });
-            }
-        }
-        return result;
-    }
-
-    var dataset = parseCSV(csvData);
+    var loadingMsg = document.getElementById('loadingMsg');
     var searchInput = document.getElementById('searchInput');
     var tableBody = document.getElementById('tableBody');
 
+    // Monitor de estado de sesión permanente de Firebase
+    auth.onAuthStateChanged(function(user) {
+        if (user) {
+            // Si el usuario ya está autenticado en el iPhone, preparamos la interfaz
+            userInput.style.display = "none";
+            passInput.style.display = "none";
+            loginBtn.style.display = "none";
+            errorMsg.style.display = "none";
+            loadingMsg.style.display = "block";
+            
+            bajarBaseDeDatos();
+        } else {
+            // Si no hay sesión activa, forzar pantalla de login
+            loginScreen.style.display = "flex";
+            userInput.style.display = "block";
+            passInput.style.display = "block";
+            loginBtn.style.display = "block";
+            appContent.style.display = "none";
+            loadingMsg.style.display = "none";
+        }
+    });
+
+    // Función para procesar el inicio de sesión contra Firebase
+    function ejecutarLogin() {
+        var username = userInput.value.trim();
+        var password = passInput.value;
+
+        if (!username || !password) return;
+
+        errorMsg.style.display = "none";
+        loadingMsg.style.display = "block";
+
+        auth.signInWithEmailAndPassword(username, password)
+        .catch(function(error) {
+            console.error("Error de login: ", error);
+            loadingMsg.style.display = "none";
+            errorMsg.style.display = "block";
+            passInput.value = "";
+        });
+    }
+
+    loginBtn.addEventListener('click', ejecutarLogin);
+    passInput.addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') ejecutarLogin();
+    });
+
+    // Descarga segura de la base de datos solo para usuarios autenticados
+    function bajarBaseDeDatos() {
+        db.collection("deportistas").get()
+        .then(function(querySnapshot) {
+            dataset = [];
+            querySnapshot.forEach(function(doc) {
+                var d = doc.data();
+                dataset.push({
+                    nombre: d.nombre,
+                    rut: d.rut,
+                    fecha: d.fechaNacimiento,
+                    prevision: d.prevision
+                });
+            });
+            
+            // Ocultar muro de login y activar buscador
+            loginScreen.style.display = "none";
+            appContent.style.display = "block";
+        })
+        .catch(function(error) {
+            console.error("Error al descargar datos: ", error);
+            loadingMsg.style.display = "none";
+            errorMsg.textContent = "Error de sincronización con la nube.";
+            errorMsg.style.display = "block";
+            auth.signOut(); // Desloguear si hay fallos de permisos
+        });
+    }
+
+    // LÓGICA DE BÚSQUEDA AVANZADA ACCENT-INSENSITIVE
     function normalizeText(str) {
         if (!str) return "";
         var map = {
