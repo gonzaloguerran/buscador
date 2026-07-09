@@ -662,6 +662,35 @@
             setTimeout(function() { btn.textContent = iconoOriginal; }, 1200);
         }
     }
+
+    // =========================================================
+    // GUARDIÁN DE INACTIVIDAD (AUTO-LOGOUT)
+    // =========================================================
+    var tiempoInactividad = 60 * 60 * 1000; // 60 minutos (en milisegundos)
+    var temporizadorInactividad;
+
+    function reiniciarTemporizador() {
+        // Limpiamos el cronómetro anterior
+        clearTimeout(temporizadorInactividad);
+        
+        // Solo iniciamos el conteo si el usuario está dentro de la app (no en la pantalla de login)
+        if (loginScreen.style.display === "none") {
+            temporizadorInactividad = setTimeout(function() {
+                console.log("Sesión cerrada por inactividad.");
+                cerrarSesion();
+            }, tiempoInactividad);
+        }
+    }
+
+    // Escuchamos cualquier interacción del usuario para reiniciar el reloj
+    window.onload = reiniciarTemporizador;
+    document.onmousemove = reiniciarTemporizador; // Movimiento del mouse (PC)
+    document.onkeypress = reiniciarTemporizador; // Teclado (PC)
+    document.ontouchstart = reiniciarTemporizador; // Toques en la pantalla (iPhone)
+    document.onclick = reiniciarTemporizador; // Clics generales
+    document.onscroll = reiniciarTemporizador; // Desplazamiento por la tabla
+
+    
 </script>
 </body>
 </html>
