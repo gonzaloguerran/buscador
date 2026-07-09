@@ -39,8 +39,6 @@
         .search-input { flex: 1; padding: 8px 12px; border-radius: 10px; border: none; background: #e5e5ea; font-size: 16px; box-sizing: border-box; }
 
         /* PANTALLA 1: MENU PRINCIPAL (DASHBOARD) */
-        .welcome-container { margin-top: 20px; margin-bottom: 25px; text-align: center; }
-        .welcome-container h1 { font-size: 26px; font-weight: 700; margin: 0 0 5px 0; }
         .stats-badge { background: white; padding: 6px 14px; border-radius: 20px; font-size: 13px; color: var(--ios-gray); font-weight: 500; display: inline-block; box-shadow: 0 2px 5px rgba(0,0,0,0.02); }
         .menu-grid { display: flex; flex-direction: column; gap: 15px; max-width: 400px; margin: 0 auto; }
         .menu-card { background: white; padding: 20px; border-radius: 14px; display: flex; align-items: center; gap: 15px; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.03); -webkit-tap-highlight-color: transparent; }
@@ -102,9 +100,13 @@
 <div id="appContent">
     
     <div id="dashboardView" class="view-section active-view">
-        <div class="welcome-container">
-            <h1>Buscador Seguro</h1>
-            <div class="stats-badge"><span id="totalCount">0</span> deportistas en la nube</div>
+        
+        <div style="max-width: 400px; margin: 10px auto 25px auto; display: flex; justify-content: space-between; align-items: center; padding: 0 5px;">
+            <div style="text-align: left;">
+                <h1 style="font-size: 26px; font-weight: 700; margin: 0 0 5px 0;">Buscador Seguro</h1>
+                <div class="stats-badge" style="margin:0;"><span id="totalCount">0</span> deportistas en la nube</div>
+            </div>
+            <button onclick="cerrarSesion()" style="background: none; border: none; color: var(--error-red); font-weight: bold; font-size: 15px; cursor: pointer; padding: 8px;">Salir 🚪</button>
         </div>
         
         <div class="menu-grid">
@@ -183,6 +185,7 @@
 
     <div id="compareView" class="view-section">
         <div style="max-width:600px; margin: 0 auto 15px auto;">
+            <button class="back-btn" onclick="cambiarPantalla('dashboard')">◀ Volver al Menú</button>
             <h2 style="margin: 15px 0 5px 0; font-size: 22px;">Consolidación y Auditoría</h2>
             <p style="font-size:13px; color: var(--ios-gray); margin: 0;">Selecciona el listado CSV externo para cruzarlo contra la base de datos.</p>
         </div>
@@ -284,7 +287,6 @@
             var cardRegister = document.getElementById('cardRegister');
             var cardCompare = document.getElementById('cardCompare');
             
-            // Define aquí qué correos tienen permisos de administrador
             var esAdministrador = (user.email === 'admin@admin.com');
             
             if (esAdministrador) {
@@ -319,6 +321,18 @@
             loadingMsg.style.display = "none";
             errorMsg.style.display = "block";
             passInput.value = "";
+        });
+    }
+
+    // NUEVA FUNCIÓN DE CIERRE DE SESIÓN LIMPIO
+    function cerrarSesion() {
+        auth.signOut().then(function() {
+            // Se limpian los datos de la memoria local por seguridad al salir
+            dataset = [];
+            document.getElementById('tableBody').innerHTML = '';
+            document.getElementById('totalCount').textContent = '0';
+        }).catch(function(error) {
+            console.error("Error al cerrar sesión", error);
         });
     }
 
